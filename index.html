@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Top-Down Car Simulation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0c10; font-family: 'JetBrains Mono', monospace; cursor: crosshair; }
+    
+    canvas { display: block; position: absolute; inset: 0; }
+
+    .hud {
+      position: fixed;
+      top: 20px; left: 20px;
+      color: #c5c6c7;
+      pointer-events: none;
+      line-height: 1.7;
+    }
+
+    .hud .title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #66fcf1;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .hud .text {
+      font-size: 12px;
+      opacity: 0.8;
+      letter-spacing: -0.02em; color: #45a29e;
+    }
+
+    .hint {
+      position: fixed;
+      bottom: 20px; left: 50%;
+      transform: translateX(-50%);
+      color: #45a29e;
+      font-size: 12px;
+      letter-spacing: 0.05em; text-transform: uppercase;
+      pointer-events: none;
+      transition: opacity 1s;
+    }
+
+    .hint.fade { opacity: 0; }
+  </style>
+</head>
+<body>
+
+  <canvas id="ground"></canvas>
+  <canvas id="marks"></canvas>
+  <canvas id="scene"></canvas>
+
+  <div class="hud">
+    <div class="title">Top-Down Driving</div>
+    <div class="text" id="hudText">Tap anywhere to set a destination</div>
+  </div>
+
+  <div class="hint" id="hint">Click anywhere to start driving</div>
+
+  <script>
+    const ground = document.getElementById('ground');
+    const marks = document.getElementById('marks');
+    const scene = document.getElementById('scene');
+    
+    const ctxG = ground.getContext('2d');
+    const ctxM = marks.getContext('2d');
+    const ctx = scene.getContext('2d');
+
+    const hudText = document.getElementById('hudText');
+    const hint = document.getElementById('hint');
+
+    let mctx = marks.getContext('2d');
+
+    function resize() {
+      const W = window.innerWidth;
+      const H = window.innerHeight;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      [ground, marks, scene].forEach(c => {
+        c.width = W * dpr;
+        c.height = H * dpr;
+        c.style.width = W + 'px';
+        c.style.height = H + 'px';
+      });
+
+      ctxG.scale(dpr, dpr);
+      ctxM.scale(dpr, dpr);
+      ctx.scale(dpr, dpr);
+
+      buildGround(W, H);
+    }
+
+    let bgPattern;
+    function buildGround(W, H) {
+      const gcan = document.createElement('canvas');
+      gcan.width = 200; gcan.height = 200;
+      const gctx = gcan.getContext('2d');
+
+      gctx.fillStyle = '#111318';
+      gctx.fillRect(0, 0, 200, 200);
+
+      const img = gctx.getImageData(0, 0, 200, 200);
+      for (let i = 0; i < img.data.length; i += 4) {
+        const n = (Math.random() - 0.5) * 15;
+        img.data[i] = Math.min(255, Math.max(0, 17 + n));
+        img.data[i+1] = Math.min(255, Math.max(0, 19 + n));
+        img.data[i+2] = Math.min(255, Math.max(0, 24 + n));
+      }
+      gctx.putImageData(img, 0, 0);
+
+      bgPattern = ctxG.createPattern(gcan, 'repeat');
+    }
+
+    const CAR = {
+      x: window.innerWidth / 2,
+      y: window.innerHeight / 2,
+      heading: 0,
+      speed: 0,
+      steer: 0,
+      width: 20,
+      length: 40,
+      maxSpeed: 380,
+      accel: 220,
+      brake: 400,
+      steerSpeed: 4.5
+    };
+
+    let target = null;
+    let parked = true;
+    let particles = [];
+    let ripledPoints = [];
+
+    function setTarget(x, y) {
+      target = { x, y };
+      parked = false;
+      hint.classList.add('fade');
+      ripledPoints.push({ x, y, r: 0, alpha: 1 });
+    }
+
+    window.addEventListener('pointerdown', e => {
+      setTarget(e.clientX, e.clientY);
+    });
+
+    function angleDiff(a, b) {
+      let d = a - b;
+      while (d < -Math.PI) d += Math.PI * 2;
+      while (d > Math.PI) d -= Math.PI * 2;
+      return d;
+    }
+
+    function physics(dt) {
+      if (target && !parked) {
+        const dx = target.x - CAR.x;
+        const dy = target.y - CAR.y;
+        const dist = Math.hypot(dx, dy);
+
+        const targetHeading = Math.atan2(dy, dx);
+        const headingDiff = angleDiff(targetHeading, CAR.heading);
+
+        CAR.steer = Math.max(-1, Math.min(1, headingDiff * 2.0));
+
+        let desiredSpeed = CAR.maxSpeed;
+        if (dist < 150) {
+          desiredSpeed = Math.min(CAR.maxSpeed, dist * 2.5);
+        }
+        if (Math.abs(headingDiff) > Math.PI / 3) {
+          desiredSpeed *= 0.4;
+        }
+
+        if (CAR.speed < desiredSpeed) {
+          CAR.speed = Math.min(desiredSpeed, CAR.speed + CAR.accel * dt);
+        } else {
+          CAR.speed = Math.max(desiredSpeed, CAR.speed - CAR.brake * dt);
+        }
+
+        if (dist < 15 && CAR.speed < 40) {
+          CAR.speed = 0;
+          parked = true;
+        }
+      }
+
+      CAR.heading += CAR.steer * (CAR.speed / CAR.maxSpeed) * CAR.steerSpeed * dt;
+      CAR.x += Math.cos(CAR.heading) * CAR.speed * dt;
+      CAR.y += Math.sin(CAR.heading) * CAR.speed * dt;
+
+      if (Math.abs(CAR.steer) > 0.6 && CAR.speed > 120) {
+        layMark();
+      }
+
+      if (!parked && CAR.speed > 20) {
+        const backX = CAR.x - Math.cos(CAR.heading) * 20;
+        const backY = CAR.y - Math.sin(CAR.heading) * 20;
+        particles.push({
+          x: backX + (Math.random() - 0.5) * 6,
+          y: backY + (Math.random() - 0.5) * 6,
+          vx: -Math.cos(CAR.heading) * 30 + (Math.random() - 0.5) * 20,
+          vy: -Math.sin(CAR.heading) * 30 + (Math.random() - 0.5) * 20,
+          life: 0.4,
+          maxLife: 0.4,
+          size: 2 + Math.random() * 3
+        });
+      }
+
+      for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.life -= dt;
+        if (p.life <= 0) {
+          particles.splice(i, 1);
+          continue;
+        }
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+      }
+
+      for (let i = ripledPoints.length - 1; i >= 0; i--) {
+        let r = ripledPoints[i];
+        r.r += 40 * dt;
+        r.alpha -= 1.2 * dt;
+        if (r.alpha <= 0) {
+          ripledPoints.splice(i, 1);
+        }
+      }
+
+      hudText.textContent = `Speed: ${Math.round(CAR.speed / 3.6)} km/h | Target: ${target ? 'Set' : 'None'}`;
+    }
+
+    function layMark() {
+      const cos = Math.cos(CAR.heading);
+      const sin = Math.sin(CAR.heading);
+      const halfW = CAR.width * 0.45;
+
+      const rx1 = CAR.x - cos * 12 - sin * halfW;
+      const ry1 = CAR.y - sin * 12 + cos * halfW;
+      const rx2 = CAR.x - cos * 12 + sin * halfW;
+      const ry2 = CAR.y - sin * 12 - cos * halfW;
+
+      mctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+      mctx.beginPath();
+      mctx.arc(rx1, ry1, 2.5, 0, Math.PI * 2);
+      mctx.arc(rx2, ry2, 2.5, 0, Math.PI * 2);
+      mctx.fill();
+    }
+
+    function drawGround() {
+      const W = window.innerWidth;
+      const H = window.innerHeight;
+      ctxG.fillStyle = bgPattern;
+      ctxG.fillRect(0, 0, W, H);
+    }
+
+    function drawGridLines() {
+      ctxG.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctxG.lineWidth = 1;
+      const step = 100;
+      ctxG.beginPath();
+      for (let x = 0; x < window.innerWidth; x += step) {
+        ctxG.moveTo(x, 0); ctxG.lineTo(x, window.innerHeight);
+      }
+      for (let y = 0; y < window.innerHeight; y += step) {
+        ctxG.moveTo(0, y); ctxG.lineTo(window.innerWidth, y);
+      }
+      ctxG.stroke();
+    }
+
+    function drawRipple() {
+      ripledPoints.forEach(r => {
+        ctx.strokeStyle = `rgba(102, 252, 241, ${Math.max(0, r.alpha)})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+    }
+
+    function drawTarget() {
+      if (!target) return;
+      ctx.save();
+      ctx.translate(target.x, target.y);
+      ctx.strokeStyle = '#66fcf1';
+      ctx.lineWidth = 1.5;
+
+      ctx.beginPath();
+      ctx.arc(0, 0, 10, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(-14, 0); ctx.lineTo(-6, 0);
+      ctx.moveTo(6, 0); ctx.lineTo(14, 0);
+      ctx.moveTo(0, -14); ctx.lineTo(0, -6);
+      ctx.moveTo(0, 6); ctx.lineTo(0, 14);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawParticles() {
+      particles.forEach(p => {
+        const alpha = p.life / p.maxLife;
+        ctx.fillStyle = `rgba(200, 200, 200, ${alpha * 0.4})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
+    function drawCar() {
+      ctx.save();
+      ctx.translate(CAR.x, CAR.y);
+      ctx.rotate(CAR.heading);
+
+      const w = CAR.width;
+      const l = CAR.length;
+
+      const headGlow = ctx.createRadialGradient(l/2 + 20, 0, 2, l/2 + 20, 0, 80);
+      headGlow.addColorStop(0, 'rgba(255, 255, 255, 0.4)');
+      headGlow.addColorStop(0.5, 'rgba(102, 252, 241, 0.15)');
+      headGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      
+      ctx.fillStyle = headGlow;
+      ctx.beginPath();
+      ctx.arc(l/2 + 20, 0, 80, -Math.PI / 3, Math.PI / 3);
+      ctx.lineTo(l/2, 0);
+      ctx.fill();
+
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+      roundRect(ctx, -l/2 + 3, -w/2 + 3, l, w, 4);
+      ctx.fill();
+
+      ctx.fillStyle = '#111';
+      const steerAngle = CAR.steer * 0.5;
+      
+      [-w/2 - 1, w/2 + 1].forEach(offsetY => {
+        ctx.save();
+        ctx.translate(l/3, offsetY);
+        ctx.rotate(steerAngle);
+        roundRect(ctx, -4, -2, 8, 4, 1);
+        ctx.fill();
+        ctx.restore();
+      });
+
+      [-w/2 - 1, w/2 + 1].forEach(offsetY => {
+        roundRect(ctx, -l/3 - 4, offsetY - 2, 8, 4, 1);
+        ctx.fill();
+      });
+
+      const bodyGrad = ctx.createLinearGradient(0, -w/2, 0, w/2);
+      bodyGrad.addColorStop(0, '#45a29e');
+      bodyGrad.addColorStop(0.5, '#66fcf1');
+      bodyGrad.addColorStop(1, '#1f2833');
+
+      ctx.fillStyle = bodyGrad;
+      roundRect(ctx, -l/2, -w/2, l, w, 5);
+      ctx.fill();
+
+      ctx.fillStyle = '#0b0c10';
+      roundRect(ctx, -l/6, -w/3, l/3, w*0.66, 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(l/2 - 2, -w/2 + 2, 2, 3);
+      ctx.fillRect(l/2 - 2, w/2 - 5, 2, 3);
+
+      const braking = target && !parked && CAR.speed > 50 && (CAR.speed > Math.hypot(target.x - CAR.x, target.y - CAR.y) * 2.5);
+      ctx.fillStyle = braking ? '#ff0055' : '#880022';
+      ctx.fillRect(-l/2, -w/2 + 2, 2, 4);
+      ctx.fillRect(-l/2, w/2 - 6, 2, 4);
+
+      ctx.restore();
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.arcTo(x + w, y, x + w, y + r, r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+      ctx.lineTo(x + r, y + h);
+      ctx.arcTo(x, y + h, x, y + h - r, r);
+      ctx.lineTo(x, y + r);
+      ctx.arcTo(x, y, x + r, y, r);
+      ctx.closePath();
+    }
+
+    let lastTime = performance.now();
+    function frame(time) {
+      const dt = Math.min((time - lastTime) / 1000, 0.05);
+      lastTime = time;
+
+      physics(dt);
+
+      const W = window.innerWidth;
+      const H = window.innerHeight;
+
+      ctx.clearRect(0, 0, W, H);
+
+      drawRipple();
+      drawTarget();
+      drawParticles();
+      drawCar();
+
+      requestAnimationFrame(frame);
+    }
+
+    window.addEventListener('resize', resize);
+    resize();
+    drawGround();
+    drawGridLines();
+    requestAnimationFrame(frame);
+  </script>
+</body>
+  </html>
+  
