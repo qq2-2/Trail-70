@@ -19,24 +19,6 @@
     overflow: hidden;
   }
 
-  /* Big counter bottom-right */
-  #counter {
-    position: absolute;
-    bottom: 4vh;
-    right: 5vw;
-    font-size: clamp(60px, 12vw, 180px);
-    font-weight: 800;
-    color: #fff;
-    letter-spacing: -0.04em;
-    line-height: 1;
-  }
-  #counter::after {
-    content: "%";
-    font-size: 0.35em;
-    vertical-align: top;
-    color: #d5001c;
-  }
-
   /* Porsche label top-left */
   #brand {
     position: absolute;
@@ -52,8 +34,8 @@
   /* ===== THE CAR (your image) ===== */
   #car-wrap {
     position: absolute;
-    bottom: 18vh;
-    left: -30vw;   /* starts off-screen left */
+    bottom: 25vh;
+    left: -30vw;
     width: 26vw;
     min-width: 260px;
   }
@@ -64,17 +46,26 @@
     display: block;
   }
 
-  /* Road line */
-  #road {
+  /* ===== HEADLIGHT GLOW ===== */
+  #glow {
     position: absolute;
-    bottom: 15vh;
-    left: 0;
-    width: 200%;
-    height: 2px;
-    background: repeating-linear-gradient(90deg, #555 0 40px, transparent 40px 80px);
-    animation: roadmove 0.4s linear infinite;
+    /* Position tuned to the headlight in your image */
+    left: 47%;
+    top: 44%;
+    width: 55%;
+    aspect-ratio: 1;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(circle,
+      rgba(255,255,255,0.9) 0%,
+      rgba(220,230,255,0.45) 30%,
+      rgba(180,200,255,0.15) 55%,
+      transparent 70%);
+    filter: blur(6px);
+    opacity: 0;          /* hidden until flicker starts */
+    pointer-events: none;
+    mix-blend-mode: screen;  /* blends nicely over the dark image */
   }
-  @keyframes roadmove { to { transform: translateX(-80px); } }
 
   /* ===== PAGE CONTENT (revealed after) ===== */
   #content {
@@ -82,10 +73,20 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #f4f4f4;
-    color: #111;
+    background: #0a0a0a;
+    color: #fff;
     font-size: 3rem;
     opacity: 0;
+  }
+
+  /* Neumorphic-style content card */
+  .card {
+    padding: 3rem 4rem;
+    border-radius: 24px;
+    background: #0a0a0a;
+    box-shadow:
+      12px 12px 24px rgba(255,255,255,0.03),
+      -12px -12px 24px rgba(0,0,0,0.9);
   }
 </style>
 </head>
@@ -98,43 +99,46 @@
     <!-- Your Porsche image -->
     <div id="car-wrap">
       <img src="porsche.jpg" alt="Porsche">
+      <div id="glow"></div>
     </div>
-
-    <div id="road"></div>
-    <div id="counter">0</div>
   </div>
 
   <!-- Your actual site content -->
   <div id="content">
-    <h1>Welcome to the site 🏁</h1>
+    <div class="card">
+      <h1>Welcome to the site 🏁</h1>
+    </div>
   </div>
 
 <script>
-  // --- Counter 0 -> 100 ---
-  const counter = document.getElementById('counter');
-  const countObj = { val: 0 };
-
   const tl = gsap.timeline();
 
-  tl.to(countObj, {
-    val: 100,
-    duration: 3,
-    ease: "power2.inOut",
-    onUpdate: () => counter.textContent = Math.round(countObj.val)
-  })
-  // Car drives across the screen during loading
-  .fromTo('#car-wrap', { x: 0 }, { x: '130vw', duration: 3, ease: 'none' }, 0)
+  tl
+  // Car drives across the screen
+  .fromTo('#car-wrap', { x: 0 }, { x: '130vw', duration: 3, ease: 'power1.in' }, 0)
+  // ===== HEADLIGHT FLICKERS TWICE near the end of the drive =====
+  .to('#glow', { opacity: 1, duration: 0.08 }, 2.1)
+  .to('#glow', { opacity: 0.2, duration: 0.08 }, 2.18)
+  .to('#glow', { opacity: 1, duration: 0.08 }, 2.26)
+  .to('#glow', { opacity: 0, duration: 0.08 }, 2.34)
+  .to('#glow', { opacity: 1, duration: 0.08 }, 2.42)   // second flicker
+  .to('#glow', { opacity: 0.2, duration: 0.08 }, 2.50)
+  .to('#glow', { opacity: 1, duration: 0.12 }, 2.58)
+  .to('#glow', { opacity: 0, duration: 0.3, ease: 'power1.out' }, 2.9)
   // Small scale-up as the car launches off at the end
   .to('#car-wrap', { scale: 1.05, duration: 0.3, ease: 'power2.out' }, 2.7)
-  // Curtain lifts, revealing the site
+  // ===== CURTAIN LIFTS — translucent slide-up reveal =====
   .to('#preloader', {
     yPercent: -100,
-    duration: 0.9,
+    duration: 1,
     ease: 'power4.inOut'
   }, "+=0.2")
-  // Content fades in
-  .to('#content', { opacity: 1, duration: 0.8 }, "-=0.4");
+  // Content slides up from bottom to top with a translucent, soft feel
+  .fromTo('#content',
+    { y: '40vh', opacity: 0, filter: 'blur(12px)' },
+    { y: 0, opacity: 1, filter: 'blur(0px)', duration: 1.1, ease: 'power3.out' },
+    "-=0.45");
 </script>
 </body>
-</html>
-
+     </html>
+     
